@@ -7,6 +7,9 @@ from collections import Counter
 import nltk
 from nltk.util import ngrams
 from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.decomposition import TruncatedSVD
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import KMeans
 
 nlp = spacy.load("en_core_web_sm")
 
@@ -78,23 +81,59 @@ def extract_features(window_tokens):
         "lexical_richness_ttr": ttr
     }
 
+def transformation_features(df):
+    print(df)
+    x = df[features_cols]
+    scaler = StandardScaler()
+    x_scaled = scaler.fit_transform(x)
+    svd = TruncatedSVD(n_components=3, random_state=42)
+    x_reduced = svd.fit_transform(x_scaled)
+
+    df_reduced = pd.DataFrame(
+        x_reduced, 
+        columns=[f'Component_{i+1}' for i in range(x_reduced.shape[1])]
+    )
+
+    df_final = pd.concat([df[['file', 'window_id']], df_reduced], axis=1)
+    return df_reduced, df_final
+
+def clasiffier_temp(df_reduced, df_final):
+    kmeans = KMeans(n_clusters=2, random_state=42, n_init=10)
+    df_final['cluster'] = kmeans.fit_predict(df_reduced)
+
+    counts = df_final['cluster'].value_counts()
+    clase_predominante = counts.idxmax()
+
+    df_final['style_class'] = df_final['cluster'].apply(
+        lambda x: 'Clase 1 (Original)' if x == clase_predominante else 'Clase 2 (Sospechoso)'
+    )
+
+    print("\nConteo de ventanas por clase:")
+    print(df_final['style_class'].value_counts())
+
 """
 Main loop
 """
-folder_path = './dataset/' #cambiar
+folder_path = 'part1/' #cambiar
 all_data = []
+features_cols = ["stop_freq", "char_ngrams", "pos_bigrams_unique", 
+                 "punct_freq", "special_freq", "avg_sent_len", "lexical_richness_ttr"]
 
 for file in os.listdir(folder_path):
     if file.endswith(".txt"):
         with open(os.path.join(folder_path, file), 'r', encoding='utf-8') as f:
             content = f.read()
-            # Creamos las ventanas (Ej: 200 palabras, avanza de 100 en 100)
-            windows = get_sliding_windows(content, window_size=200, step_size=100)
+            windows = get_sliding_windows(content, window_size, overlap)
             
+            print("break1")
             for idx, win in enumerate(windows):
                 feat = extract_features(win)
                 feat['file'] = file
                 feat['window_id'] = idx
                 all_data.append(feat)
 
-df = pd.DataFrame(all_data)
+            
+            df = pd.DataFrame(all_data)
+            df_reduced, df_final = transformation_features(df)
+            clasiffier_temp(df_reduced, df_final)
+            break
